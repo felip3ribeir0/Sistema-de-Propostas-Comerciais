@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+Thumbs.db
+
+# Arquivos gerados pelo app
+*.pdf
+*.proposta
+!exemplos/*.proposta

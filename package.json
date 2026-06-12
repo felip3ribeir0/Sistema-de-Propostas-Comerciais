@@ -1,0 +1,12 @@
+{
+  "name": "propostas-comerciais",
+  "version": "1.0.0",
+  "description": "Sistema de Montagem de Propostas Comerciais",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "29.4.6"
+  }
+}
