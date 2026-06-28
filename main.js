@@ -57,6 +57,53 @@ ipcMain.handle('dlg:open', async () => {
   } catch (e) { return { ok: false, erro: e.message } }
 })
 
+// ── Cálculo de rota (distância) via CEP ──────────────────
+// Origem fixa: Rua Xambrê, Parque Cisper, São Paulo - SP (coordenadas geocodificadas)
+const ORIGEM = { lat: -23.4929315, lon: -46.4930230, nome: 'Rua Xambrê, Parque Cisper, São Paulo - SP' }
+
+async function geocode (q) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=' + encodeURIComponent(q)
+  const r = await fetch(url, { headers: { 'User-Agent': 'EngenheiroDoProjeto-Propostas/1.0 (contato@engenheirodoprojeto.com.br)' } })
+  const j = await r.json()
+  if (!j || !j.length) return null
+  return { lat: parseFloat(j[0].lat), lon: parseFloat(j[0].lon), nome: j[0].display_name }
+}
+
+ipcMain.handle('geo:rota', async (_, { cep } = {}) => {
+  try {
+    const cepLimpo = String(cep || '').replace(/\D/g, '')
+    if (cepLimpo.length !== 8) return { ok: false, erro: 'CEP inválido (informe 8 dígitos)' }
+
+    let viaCep = null
+    try {
+      const vr = await fetch('https://viacep.com.br/ws/' + cepLimpo + '/json/')
+      const vj = await vr.json()
+      if (vj && !vj.erro) viaCep = vj
+    } catch (_) {}
+
+    // tenta endereço completo → cidade/UF → CEP puro
+    let dest = null
+    if (viaCep) {
+      const ruaQ = [viaCep.logradouro, viaCep.bairro, viaCep.localidade, viaCep.uf].filter(Boolean).join(', ')
+      if (ruaQ) dest = await geocode(ruaQ + ', Brasil')
+      if (!dest && viaCep.localidade) dest = await geocode(viaCep.localidade + ', ' + (viaCep.uf || '') + ', Brasil')
+    }
+    if (!dest) dest = await geocode(cepLimpo + ', Brasil')
+    if (!dest) return { ok: false, erro: 'Não foi possível localizar o CEP do cliente' }
+
+    const destNome = viaCep
+      ? [viaCep.logradouro, viaCep.bairro, (viaCep.localidade || '') + (viaCep.uf ? '/' + viaCep.uf : '')].filter(Boolean).join(', ')
+      : dest.nome
+
+    const ru = `https://router.project-osrm.org/route/v1/driving/${ORIGEM.lon},${ORIGEM.lat};${dest.lon},${dest.lat}?overview=false`
+    const rr = await fetch(ru)
+    const rj = await rr.json()
+    if (!rj || rj.code !== 'Ok' || !rj.routes || !rj.routes.length) return { ok: false, erro: 'Não foi possível calcular a rota' }
+    const kmIda = rj.routes[0].distance / 1000
+    return { ok: true, kmIda, destino: destNome, origem: ORIGEM.nome }
+  } catch (e) { return { ok: false, erro: e.message } }
+})
+
 ipcMain.handle('pdf:print', async (_, { nome } = {}) => {
   try {
     const data = await win.webContents.printToPDF({

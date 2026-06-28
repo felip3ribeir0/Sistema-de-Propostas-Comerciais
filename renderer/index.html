@@ -153,6 +153,20 @@ input,textarea,select{user-select:text}
 .calc-row b{font-size:15px;color:var(--brand)}
 .sb-sep{height:1px;background:var(--bd);margin:4px 8px}
 .btn-green{background:#1E8449;color:#fff}.btn-green:hover{background:#229954}
+/* ═══ FATORES DE CUSTO (interno) ═══ */
+.sec-interno .sec-titulo{background:linear-gradient(135deg,#1A5276,#0E2E44)}
+.fat-grid{display:flex;flex-direction:column;gap:5px}
+.fat-row{display:flex;align-items:center;gap:10px;padding:7px 11px;border:1px solid var(--bd);border-radius:8px;background:#fff;cursor:pointer;transition:.12s}
+.fat-row:hover{background:var(--bg2)}
+.fat-row.off{opacity:.55}
+.fat-chk{width:17px;height:17px;accent-color:#1A5276;cursor:pointer;flex-shrink:0}
+.fat-lbl{flex:1;font-size:12.5px}
+.fat-lbl small{color:var(--mt);font-size:10.5px;display:block;margin-top:1px}
+.fat-val{width:120px;text-align:right;border:1px solid var(--bd);border-radius:6px;padding:6px 9px;font-size:12px;font-family:inherit;color:var(--tx);background:#fafbfc}
+.fat-val:focus{outline:none;border-color:#1A5276;background:#fff}
+.fat-perc{width:64px;text-align:right;border:1px solid var(--bd);border-radius:6px;padding:6px 9px;font-size:12px;font-family:inherit;-moz-appearance:textfield}
+.fat-ro{width:120px;text-align:right;font-size:12.5px;font-weight:700;color:#1A5276}
+.rota-box{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:2px 0 6px}
 @media print{
   #tb,#sb,#toasts,.topbar{display:none!important}
   html,body{height:auto!important;overflow:visible!important;background:#fff!important;margin:0!important;padding:0!important}
@@ -458,13 +472,45 @@ function novaPropostaObj(){
   return {
     id:uid(),
     cabecalho:{numero:proxNumero(),data:hoje(),validadeDias:15},
-    cliente:{contato:'',empresa:'',cnpj:'',email:'',telefone:'',cidade:'',estado:''},
+    cliente:{contato:'',empresa:'',cnpj:'',email:'',telefone:'',cep:'',cidade:'',estado:''},
     apresentacao:CFG.apresentacaoPadrao||APRESENTACAO_PADRAO,
     servicos:[],
     comercial:{prazo:'',pagamento:'',garantia:'',observacoes:''},
     encerramento:CFG.encerramentoPadrao||ENCERRAMENTO_PADRAO,
-    descontos:0
+    descontos:0,
+    fatores:novosFatores()
   }
+}
+
+// ── Fatores de custo (uso interno) ──
+const KM_RATE=2.00          // R$/km
+const MANUT_RATE=0.40       // R$/km manutenção/desgaste
+const SEGURO_CARRO_MES=370, SEGURO_CARRO_DIAS=22
+const ALIM_DIA=100, DIARIA_EDP=615, ART_VAL=109
+const IMPOSTO_PERC=6, INSS_FIXO=180
+function novosFatores(){
+  const it=(manual)=>({on:false,valor:0,manual:!!manual})
+  return {
+    diarias:1, arts:1, kmIda:0, kmManual:false, rotaInfo:'',
+    itens:{
+      gasolina:it(), manutencao:it(), seguro_carro:it(), pedagio:it(true),
+      alimentacao:it(), diaria_edp:it(), art:it(),
+      estacionamento:it(true), estadia:it(true), passagem:it(true),
+      aluguel_equip:it(true), ajudante:it(true), impressao:it(true), escritorio:it(true),
+      contingencia:{on:false,perc:5}, urgencia:{on:false,perc:15}, impostos:{on:false}
+    }
+  }
+}
+function mergeFatores(f){
+  const base=novosFatores()
+  if(!f||typeof f!=='object')return base
+  base.diarias=f.diarias==null?1:f.diarias
+  base.arts=f.arts==null?1:f.arts
+  base.kmIda=Number(f.kmIda)||0
+  base.kmManual=!!f.kmManual
+  base.rotaInfo=f.rotaInfo||''
+  if(f.itens)Object.keys(base.itens).forEach(k=>{if(f.itens[k])base.itens[k]={...base.itens[k],...f.itens[k]}})
+  return base
 }
 function novoServico(tipoId){
   const cat=CATALOGO[tipoId]||CATALOGO.outro
@@ -507,7 +553,9 @@ async function abrirProposta(){
     const obj=JSON.parse(r.txt)
     // migração defensiva
     if(!obj.cabecalho)obj.cabecalho={numero:proxNumero(),data:hoje(),validadeDias:15}
-    if(!obj.cliente)obj.cliente={contato:'',empresa:'',cnpj:'',email:'',telefone:'',cidade:'',estado:''}
+    if(!obj.cliente)obj.cliente={contato:'',empresa:'',cnpj:'',email:'',telefone:'',cep:'',cidade:'',estado:''}
+    if(obj.cliente.cep==null)obj.cliente.cep=''
+    obj.fatores=mergeFatores(obj.fatores)
     if(!Array.isArray(obj.servicos))obj.servicos=[]
     obj.servicos.forEach(s=>{if(!Array.isArray(s.itens))s.itens=[];s.itens.forEach(it=>{if(it.incluido==null)it.incluido=true;if(!it.id)it.id=uid()});if(!s.id)s.id=uid();if(s.valor==null)s.valor=0})
     if(!obj.comercial)obj.comercial={prazo:'',pagamento:'',garantia:'',observacoes:''}
@@ -553,7 +601,29 @@ function atualizarHomeLogo(){
 // TOTAIS
 // ═══════════════════════════════════════════════════════
 const subtotalServicos=()=>P.servicos.reduce((s,sv)=>s+(Number(sv.valor)||0),0)
-const totalProposta=()=>Math.max(0,subtotalServicos()-(Number(P.descontos)||0))
+const totalFatores=()=>calcFatores().total
+const totalProposta=()=>Math.max(0,subtotalServicos()-(Number(P.descontos)||0)+totalFatores())
+
+function calcFatores(){
+  if(!P||!P.fatores)return{total:0,diretos:0,perc:0,impostos:0}
+  const F=P.fatores,I=F.itens
+  const dias=Math.max(0,Number(F.diarias)||0)
+  const arts=Math.max(0,Number(F.arts)||0)
+  const kmIV=(Math.max(0,Number(F.kmIda)||0))*2
+  // valores automáticos (não sobrescreve se editado manualmente)
+  const auto={gasolina:kmIV*KM_RATE,manutencao:kmIV*MANUT_RATE,seguro_carro:(SEGURO_CARRO_MES/SEGURO_CARRO_DIAS)*dias,alimentacao:ALIM_DIA*dias,diaria_edp:DIARIA_EDP*dias,art:ART_VAL*arts}
+  Object.keys(auto).forEach(k=>{if(I[k]&&!I[k].manual)I[k].valor=auto[k]})
+  const diretosKeys=['gasolina','manutencao','seguro_carro','pedagio','alimentacao','diaria_edp','art','estacionamento','estadia','passagem','aluguel_equip','ajudante','impressao','escritorio']
+  let diretos=0
+  diretosKeys.forEach(k=>{if(I[k]&&I[k].on)diretos+=Number(I[k].valor)||0})
+  const baseServ=subtotalServicos()
+  let perc=0
+  if(I.contingencia&&I.contingencia.on)perc+=(baseServ+diretos)*((Number(I.contingencia.perc)||0)/100)
+  if(I.urgencia&&I.urgencia.on)perc+=(baseServ+diretos)*((Number(I.urgencia.perc)||0)/100)
+  let impostos=0
+  if(I.impostos&&I.impostos.on)impostos=(baseServ+diretos+perc)*(IMPOSTO_PERC/100)+INSS_FIXO
+  return{total:diretos+perc+impostos,diretos,perc,impostos,dias,arts,kmIV}
+}
 
 // ═══════════════════════════════════════════════════════
 // EDITOR
@@ -582,7 +652,8 @@ function renderEditor(){
       <div class="campo"><label>Telefone</label><input value="${eA(CL.telefone)}" oninput="P.cliente.telefone=this.value;marcarSujo()"></div>
       <div class="campo"><label>E-mail</label><input value="${eA(CL.email)}" oninput="P.cliente.email=this.value;marcarSujo()"></div>
     </div>
-    <div class="grid2">
+    <div class="grid3">
+      <div class="campo"><label>CEP <small style="color:var(--mt);font-weight:400">(usado nos fatores de custo)</small></label><input value="${eA(CL.cep)}" placeholder="00000-000" oninput="P.cliente.cep=this.value;marcarSujo()"></div>
       <div class="campo"><label>Cidade</label><input value="${eA(CL.cidade)}" oninput="P.cliente.cidade=this.value;marcarSujo()"></div>
       <div class="campo"><label>Estado (UF)</label><input value="${eA(CL.estado)}" oninput="P.cliente.estado=this.value;marcarSujo()"></div>
     </div></div></div>`
@@ -630,11 +701,17 @@ function renderEditor(){
     <button class="btn btn-primary" onclick="addServ(document.getElementById('sel-tipo').value)">➕ Adicionar serviço</button>
   </div></div></div>`
 
+  // 4½ — Fatores de custo (interno)
+  h+=renderFatoresEditor()
+
   // 5 — Condições comerciais
   h+=`<div class="sec"><div class="sec-titulo"><span class="sec-num">05</span> Condições Comerciais</div><div class="sec-corpo">
     <div style="background:#fff;border:1px solid var(--bd);border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:12px;color:var(--mt)">Subtotal dos serviços</span><b style="color:var(--brand)">${fmtBRL(subtotalServicos())}</b>
     </div>
+    ${totalFatores()>0?`<div style="background:#eef4f9;border:1px solid #cdddea;border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:12px;color:#1A5276">🔒 Fatores de custo (interno, embutidos no total)</span><b style="color:#1A5276">+ ${fmtBRL(totalFatores())}</b>
+    </div>`:''}
     <div class="grid2">
       <div class="campo"><label>Desconto (R$)</label><input value="${P.descontos?eA(fmtBRL(P.descontos).replace('R$ ','')):''}" placeholder="0,00" onchange="P.descontos=parseMoeda(this.value);marcarSujo();renderEditor()"></div>
       <div class="campo"><label>Valor total da proposta</label><input value="${eA(fmtBRL(totalProposta()))}" readonly style="font-weight:700;color:var(--brand)"></div>
@@ -665,12 +742,102 @@ function rmItem(servId,itemId){const s=P.servicos.find(s=>s.id===servId);if(!s)r
 function toggleItem(servId,itemId){const s=P.servicos.find(s=>s.id===servId);if(!s)return;const it=s.itens.find(i=>i.id===itemId);if(!it)return;it.incluido=!it.incluido;marcarSujo();renderEditor();setTimeout(()=>{const c=document.getElementById('sc-'+servId);if(c)c.classList.add('aberto')},0)}
 function setItem(servId,itemId,val){const s=P.servicos.find(s=>s.id===servId);if(!s)return;const it=s.itens.find(i=>i.id===itemId);if(it){it.texto=val;marcarSujo()}}
 
+// ── Fatores de custo (editor) ──
+function toggleFat(id){const it=P.fatores.itens[id];if(!it)return;it.on=!it.on;marcarSujo();renderEditor()}
+function setFatVal(id,v){const it=P.fatores.itens[id];if(!it)return;it.valor=parseMoeda(v);it.manual=true;it.on=true;marcarSujo();renderEditor()}
+function setFatPerc(id,v){const it=P.fatores.itens[id];if(!it)return;it.perc=parseFloat(String(v).replace(',','.'))||0;it.on=true;marcarSujo();renderEditor()}
+function setDiarias(v){P.fatores.diarias=Math.max(0,parseInt(v)||0);marcarSujo();renderEditor()}
+function setArts(v){P.fatores.arts=Math.max(0,parseInt(v)||0);marcarSujo();renderEditor()}
+function setKmManual(v){P.fatores.kmIda=Math.max(0,parseFloat(String(v).replace(',','.'))||0);P.fatores.kmManual=true;marcarSujo();renderEditor()}
+async function calcularRota(){
+  const cep=(P.cliente.cep||'').trim()
+  if(!cep){toast('Preencha o CEP do cliente na seção "Dados do Cliente".','err');return}
+  if(!window.eletron||!eletron.calcRota){toast('Recurso indisponível — use npm start.','err');return}
+  toast('Calculando distância (pode levar alguns segundos)…','ok')
+  try{
+    const r=await eletron.calcRota(cep)
+    if(r&&r.ok){
+      P.fatores.kmIda=Math.round(r.kmIda*10)/10
+      P.fatores.kmManual=false
+      P.fatores.rotaInfo=r.destino+' · '+P.fatores.kmIda.toFixed(1)+' km (ida) · '+(P.fatores.kmIda*2).toFixed(1)+' km (ida e volta)'
+      marcarSujo();renderEditor()
+      toast('Distância: '+(P.fatores.kmIda*2).toFixed(1)+' km ida e volta','ok')
+    }else toast('Não foi possível calcular: '+(r&&r.erro||'erro desconhecido'),'err')
+  }catch(err){toast('Erro ao calcular rota: '+(err.message||err),'err')}
+}
+function _fatLinha(id,icone,label,hint,ph){
+  const it=P.fatores.itens[id]
+  const val=it.valor?eA(fmtBRL(it.valor).replace('R$ ','')):''
+  return `<label class="fat-row ${it.on?'':'off'}">
+    <input type="checkbox" class="fat-chk" ${it.on?'checked':''} onchange="toggleFat('${id}')">
+    <span class="fat-lbl">${icone} ${label}${hint?`<small>${hint}</small>`:''}</span>
+    <input class="fat-val" value="${val}" placeholder="${ph||'0,00'}" onclick="event.preventDefault()" onchange="setFatVal('${id}',this.value)">
+  </label>`
+}
+function _fatPerc(id,icone,label){
+  const it=P.fatores.itens[id]
+  return `<label class="fat-row ${it.on?'':'off'}">
+    <input type="checkbox" class="fat-chk" ${it.on?'checked':''} onchange="toggleFat('${id}')">
+    <span class="fat-lbl">${icone} ${label}</span>
+    <input class="fat-perc" type="number" min="0" step="0.5" value="${it.perc||0}" onclick="event.stopPropagation()" onchange="setFatPerc('${id}',this.value)"><span style="font-size:11px;color:var(--mt)">%</span>
+  </label>`
+}
+function renderFatoresEditor(){
+  if(!P.fatores)P.fatores=novosFatores()
+  const F=P.fatores,cf=calcFatores()
+  const kmIV=(Number(F.kmIda)||0)*2
+  return `<div class="sec sec-interno"><div class="sec-titulo"><span>🔒</span> Fatores de Custo — Uso Interno<small style="opacity:.75;font-weight:400;text-transform:none;letter-spacing:0;margin-left:8px">não aparece na proposta do cliente</small></div><div class="sec-corpo">
+    <p style="font-size:12px;color:var(--mt)">Marque os fatores que se aplicam a este serviço. Os valores são calculados automaticamente e <b>somados ao valor final da proposta</b> (diluídos nos serviços, invisíveis ao cliente).</p>
+    <div class="grid3">
+      <div class="campo"><label>Diárias para execução</label><input type="number" min="0" value="${eA(F.diarias)}" onchange="setDiarias(this.value)"></div>
+      <div class="campo"><label>Quantidade de ARTs</label><input type="number" min="0" value="${eA(F.arts)}" onchange="setArts(this.value)"></div>
+      <div class="campo"><label>Distância ida (km)</label><input value="${eA((Number(F.kmIda)||0).toFixed(1))}" onchange="setKmManual(this.value)"></div>
+    </div>
+    <div class="rota-box">
+      <button class="btn btn-outline btn-sm" onclick="calcularRota()">📍 Calcular distância pelo CEP</button>
+      <span style="font-size:11px;color:var(--mt)">${F.rotaInfo?'📌 '+e(F.rotaInfo):'Preencha o CEP do cliente e clique para calcular automaticamente (ida e volta: '+kmIV.toFixed(1)+' km).'}</span>
+    </div>
+    <div class="fat-grid">
+      ${_fatLinha('gasolina','⛽','Gasolina','R$ 2,00/km · '+kmIV.toFixed(1)+' km i/v')}
+      ${_fatLinha('manutencao','🔧','Manutenção / desgaste do veículo','R$ '+MANUT_RATE.toFixed(2).replace('.',',')+'/km · '+kmIV.toFixed(1)+' km i/v')}
+      ${_fatLinha('seguro_carro','🛡️','Seguro do carro','R$ 370 ÷ 22 × '+F.diarias+' diária(s)')}
+      ${_fatLinha('pedagio','🛣️','Pedágio','rota mais curta — informe o valor','valor')}
+      ${_fatLinha('alimentacao','🍽️','Alimentação','R$ 100/dia × '+F.diarias+' diária(s)')}
+      ${_fatLinha('diaria_edp','📐','Diária Engenheiro do Projeto','R$ 615/dia × '+F.diarias+' diária(s)')}
+      ${_fatLinha('art','📋','ART','R$ 109 × '+F.arts+' ART(s)')}
+      ${_fatLinha('estacionamento','🅿️','Estacionamento','se necessário')}
+      ${_fatLinha('estadia','🏨','Estadia / hospedagem','se necessário')}
+      ${_fatLinha('passagem','✈️','Passagem aérea','se necessário')}
+      ${_fatLinha('aluguel_equip','🛠️','Aluguel de equipamento','se necessário')}
+      ${_fatLinha('ajudante','👷','Ajudante','se necessário')}
+      ${_fatLinha('impressao','🖨️','Impressão de documentos','se necessário')}
+      ${_fatLinha('escritorio','💻','Horas de escritório (elaboração)','sugestão — se necessário')}
+      ${_fatPerc('contingencia','📊','Contingência / imprevistos (sugestão)')}
+      ${_fatPerc('urgencia','⚡','Urgência / prazo curto (sugestão)')}
+      <label class="fat-row ${F.itens.impostos.on?'':'off'}">
+        <input type="checkbox" class="fat-chk" ${F.itens.impostos.on?'checked':''} onchange="toggleFat('impostos')">
+        <span class="fat-lbl">🧾 Impostos<small>6% sobre a base + R$ 180 INSS</small></span>
+        <span class="fat-ro">${fmtBRL(cf.impostos)}</span>
+      </label>
+    </div>
+    <div class="calc-card">
+      <div class="calc-row"><span>Custos diretos</span><span>${fmtBRL(cf.diretos)}</span></div>
+      ${cf.perc>0?`<div class="calc-row"><span>Percentuais (contingência / urgência)</span><span>${fmtBRL(cf.perc)}</span></div>`:''}
+      ${cf.impostos>0?`<div class="calc-row"><span>Impostos (6% + INSS)</span><span>${fmtBRL(cf.impostos)}</span></div>`:''}
+      <div class="calc-row"><span><b>Total dos fatores — somado ao valor final</b></span><span><b>${fmtBRL(cf.total)}</b></span></div>
+    </div>
+  </div></div>`
+}
+
 // ═══════════════════════════════════════════════════════
 // RELATÓRIO / PROPOSTA (A4)
 // ═══════════════════════════════════════════════════════
 function renderRel(){
   const doc=document.getElementById('rel-doc');if(!doc||!P)return
   const c=CFG
+  // Fatores de custo (internos) diluídos proporcionalmente nos serviços — invisíveis ao cliente
+  const _fat=totalFatores(),_subt=subtotalServicos()
+  const vdoc=s=>(_fat>0&&_subt>0)?(Number(s.valor)||0)+_fat*((Number(s.valor)||0)/_subt):(Number(s.valor)||0)
   const corT=c.corTopico||'#7B241C'
   const corTa=c.corTabela||'#C0392B'
   const corTL=(h=>{try{return'#'+[1,3,5].map(i=>Math.min(255,parseInt(h.slice(i,i+2),16)+42).toString(16).padStart(2,'0')).join('')}catch{return h}})(corT)
@@ -740,7 +907,7 @@ function renderRel(){
       </table></div>`
     }
     body+=`<div style="margin:0 14mm 12px;display:flex;justify-content:flex-end;gap:10px;align-items:baseline">
-      <span style="font-size:10pt;color:#777">Valor do serviço:</span><b style="font-size:12pt;color:${corT}">${fmtBRL(s.valor)}</b></div>`
+      <span style="font-size:10pt;color:#777">Valor do serviço:</span><b style="font-size:12pt;color:${corT}">${fmtBRL(vdoc(s))}</b></div>`
   })
 
   // Resumo de investimento
@@ -748,8 +915,8 @@ function renderRel(){
     body+=SEC(n++,'Resumo do Investimento')
     body+=`<div style="margin:0 14mm 8px"><table style="border-collapse:collapse;width:100%">
       <tr>${Th('Serviço')}${Th('Valor','30%')}</tr>
-      ${P.servicos.map(s=>`<tr>${Td(e(s.titulo))}${Td(fmtBRL(s.valor),'text-align:right')}</tr>`).join('')}
-      ${(Number(P.descontos)||0)>0?`<tr>${Td('<b>Subtotal</b>','text-align:right')}${Td('<b>'+fmtBRL(subtotalServicos())+'</b>','text-align:right')}</tr><tr>${Td('Desconto','text-align:right')}${Td('- '+fmtBRL(P.descontos),'text-align:right;color:#777')}</tr>`:''}
+      ${P.servicos.map(s=>`<tr>${Td(e(s.titulo))}${Td(fmtBRL(vdoc(s)),'text-align:right')}</tr>`).join('')}
+      ${(Number(P.descontos)||0)>0?`<tr>${Td('<b>Subtotal</b>','text-align:right')}${Td('<b>'+fmtBRL(_subt+_fat)+'</b>','text-align:right')}</tr><tr>${Td('Desconto','text-align:right')}${Td('- '+fmtBRL(P.descontos),'text-align:right;color:#777')}</tr>`:''}
       <tr>${Td('<b style="font-size:11.5pt">TOTAL</b>','text-align:right;background:#f3f3f3')}${Td('<b style="font-size:12pt;color:'+corT+'">'+fmtBRL(totalProposta())+'</b>','text-align:right;background:#f3f3f3')}</tr>
     </table></div>`
   }
