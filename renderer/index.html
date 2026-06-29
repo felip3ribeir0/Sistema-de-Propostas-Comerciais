@@ -337,7 +337,7 @@ input,textarea,select{user-select:text}
   <div class="tb-wrap">
     <table class="data-tb">
       <thead><tr>
-        <th>Nome</th><th>Empresa</th><th>E-mail</th><th>Telefone</th>
+        <th>Código</th><th>Nome</th><th>Empresa</th><th>E-mail</th><th>Telefone</th>
         <th>Status</th><th>Fonte</th><th>Cadastro</th><th></th>
       </tr></thead>
       <tbody id="cli-tbody"></tbody>
@@ -472,7 +472,7 @@ function novaPropostaObj(){
   return {
     id:uid(),
     cabecalho:{numero:proxNumero(),data:hoje(),validadeDias:15},
-    cliente:{contato:'',empresa:'',cnpj:'',email:'',telefone:'',cep:'',cidade:'',estado:''},
+    cliente:{codigo:'',contato:'',empresa:'',cnpj:'',email:'',telefone:'',cep:'',cidade:'',estado:''},
     apresentacao:CFG.apresentacaoPadrao||APRESENTACAO_PADRAO,
     servicos:[],
     comercial:{prazo:'',pagamento:'',garantia:'',observacoes:''},
@@ -553,8 +553,9 @@ async function abrirProposta(){
     const obj=JSON.parse(r.txt)
     // migração defensiva
     if(!obj.cabecalho)obj.cabecalho={numero:proxNumero(),data:hoje(),validadeDias:15}
-    if(!obj.cliente)obj.cliente={contato:'',empresa:'',cnpj:'',email:'',telefone:'',cep:'',cidade:'',estado:''}
+    if(!obj.cliente)obj.cliente={codigo:'',contato:'',empresa:'',cnpj:'',email:'',telefone:'',cep:'',cidade:'',estado:''}
     if(obj.cliente.cep==null)obj.cliente.cep=''
+    if(obj.cliente.codigo==null)obj.cliente.codigo=''
     obj.fatores=mergeFatores(obj.fatores)
     if(!Array.isArray(obj.servicos))obj.servicos=[]
     obj.servicos.forEach(s=>{if(!Array.isArray(s.itens))s.itens=[];s.itens.forEach(it=>{if(it.incluido==null)it.incluido=true;if(!it.id)it.id=uid()});if(!s.id)s.id=uid();if(s.valor==null)s.valor=0})
@@ -642,18 +643,28 @@ function renderEditor(){
     </div></div></div>`
 
   // 2 — Cliente
+  const cliCad=getCLI().slice().sort((a,b)=>(a.empresa||a.nome||'').localeCompare(b.empresa||b.nome||''))
   h+=`<div class="sec"><div class="sec-titulo"><span class="sec-num">02</span> Dados do Cliente</div><div class="sec-corpo">
+    <div class="campo"><label>Cliente cadastrado ${CL.codigo?`<small style="color:#1A5276;font-weight:700">· ${e(CL.codigo)}</small>`:''}</label>
+      <div style="display:flex;gap:8px">
+        <select id="sel-cliente" onchange="carregarClienteSel(this.value)" style="flex:1;background:#fff;border:1px solid var(--bd);border-radius:6px;padding:8px 12px;font-size:13px;font-family:inherit;color:var(--tx)">
+          <option value="">— selecionar cliente cadastrado —</option>
+          ${cliCad.map(c=>`<option value="${c.id}" ${CL.codigo&&CL.codigo===c.codigo?'selected':''}>${e((c.codigo?c.codigo+' · ':'')+(c.empresa||c.nome)+(c.empresa&&c.nome?' ('+c.nome+')':''))}</option>`).join('')}
+        </select>
+        <button class="btn btn-outline btn-sm" onclick="salvarClienteDaProposta()" title="Cadastra/atualiza este cliente na base">💾 Salvar na base</button>
+      </div>
+    </div>
     <div class="grid2">
       <div class="campo"><label>Empresa / Razão social</label><input value="${eA(CL.empresa)}" oninput="P.cliente.empresa=this.value;marcarSujo();atualizarSB()"></div>
       <div class="campo"><label>Pessoa de contato</label><input value="${eA(CL.contato)}" oninput="P.cliente.contato=this.value;marcarSujo()"></div>
     </div>
     <div class="grid3">
-      <div class="campo"><label>CNPJ</label><input value="${eA(CL.cnpj)}" oninput="P.cliente.cnpj=this.value;marcarSujo()"></div>
+      <div class="campo"><label>CNPJ <small style="color:var(--mt);font-weight:400">(preenche automático)</small></label><input value="${eA(CL.cnpj)}" placeholder="00.000.000/0000-00" oninput="P.cliente.cnpj=this.value;marcarSujo()" onchange="buscarCNPJcliente(this.value)"></div>
       <div class="campo"><label>Telefone</label><input value="${eA(CL.telefone)}" oninput="P.cliente.telefone=this.value;marcarSujo()"></div>
       <div class="campo"><label>E-mail</label><input value="${eA(CL.email)}" oninput="P.cliente.email=this.value;marcarSujo()"></div>
     </div>
     <div class="grid3">
-      <div class="campo"><label>CEP <small style="color:var(--mt);font-weight:400">(usado nos fatores de custo)</small></label><input value="${eA(CL.cep)}" placeholder="00000-000" oninput="P.cliente.cep=this.value;marcarSujo()"></div>
+      <div class="campo"><label>CEP <small style="color:var(--mt);font-weight:400">(preenche endereço)</small></label><input value="${eA(CL.cep)}" placeholder="00000-000" oninput="P.cliente.cep=this.value;marcarSujo()" onchange="buscarCEPcliente(this.value)"></div>
       <div class="campo"><label>Cidade</label><input value="${eA(CL.cidade)}" oninput="P.cliente.cidade=this.value;marcarSujo()"></div>
       <div class="campo"><label>Estado (UF)</label><input value="${eA(CL.estado)}" oninput="P.cliente.estado=this.value;marcarSujo()"></div>
     </div></div></div>`
@@ -741,6 +752,83 @@ function addItem(servId){const s=P.servicos.find(s=>s.id===servId);if(!s)return;
 function rmItem(servId,itemId){const s=P.servicos.find(s=>s.id===servId);if(!s)return;s.itens=s.itens.filter(it=>it.id!==itemId);marcarSujo();renderEditor();setTimeout(()=>{const c=document.getElementById('sc-'+servId);if(c)c.classList.add('aberto')},0)}
 function toggleItem(servId,itemId){const s=P.servicos.find(s=>s.id===servId);if(!s)return;const it=s.itens.find(i=>i.id===itemId);if(!it)return;it.incluido=!it.incluido;marcarSujo();renderEditor();setTimeout(()=>{const c=document.getElementById('sc-'+servId);if(c)c.classList.add('aberto')},0)}
 function setItem(servId,itemId,val){const s=P.servicos.find(s=>s.id===servId);if(!s)return;const it=s.itens.find(i=>i.id===itemId);if(it){it.texto=val;marcarSujo()}}
+
+// ── Cliente: auto-preenchimento e vínculo com a base ──
+async function buscarCNPJcliente(v){
+  const d=String(v||'').replace(/\D/g,'');if(d.length!==14)return
+  if(!window.eletron||!eletron.buscarCNPJ){return}
+  toast('Buscando dados do CNPJ…','ok')
+  try{
+    const r=await eletron.buscarCNPJ(d)
+    if(r&&r.ok){
+      const x=r.dados
+      if(x.empresa)P.cliente.empresa=x.empresa
+      if(x.email&&!P.cliente.email)P.cliente.email=x.email
+      if(x.telefone&&!P.cliente.telefone)P.cliente.telefone=x.telefone
+      if(x.cep&&!P.cliente.cep)P.cliente.cep=x.cep
+      if(x.cidade)P.cliente.cidade=x.cidade
+      if(x.estado)P.cliente.estado=x.estado
+      marcarSujo();renderEditor();atualizarSB();toast('Dados do CNPJ preenchidos!','ok')
+    }else toast('CNPJ: '+(r&&r.erro||'não encontrado'),'err')
+  }catch(err){toast('Erro ao buscar CNPJ: '+(err.message||err),'err')}
+}
+async function buscarCEPcliente(v){
+  const d=String(v||'').replace(/\D/g,'');if(d.length!==8)return
+  if(!window.eletron||!eletron.buscarCEP){return}
+  try{
+    const r=await eletron.buscarCEP(d)
+    if(r&&r.ok){
+      if(r.dados.cidade)P.cliente.cidade=r.dados.cidade
+      if(r.dados.estado)P.cliente.estado=r.dados.estado
+      marcarSujo();renderEditor();toast('Endereço preenchido pelo CEP.','ok')
+    }else toast('CEP: '+(r&&r.erro||'não encontrado'),'err')
+  }catch(err){toast('Erro ao buscar CEP: '+(err.message||err),'err')}
+}
+function carregarClienteSel(id){
+  if(!id)return
+  const c=getCLI().find(x=>x.id===id);if(!c)return
+  P.cliente.codigo=c.codigo||''
+  P.cliente.empresa=c.empresa||''
+  P.cliente.contato=c.nome||''
+  P.cliente.cnpj=c.doc||''
+  P.cliente.email=c.email||''
+  P.cliente.telefone=c.telefone||''
+  P.cliente.cep=c.cep||''
+  P.cliente.cidade=c.cidade||''
+  P.cliente.estado=c.estado||''
+  marcarSujo();renderEditor();atualizarSB();toast('Cliente "'+(c.empresa||c.nome)+'" carregado.','ok')
+}
+function salvarClienteDaProposta(){
+  if(!(P.cliente.empresa||'').trim()&&!(P.cliente.contato||'').trim()){toast('Preencha empresa ou contato antes de salvar.','err');return}
+  const cli=getCLI()
+  const ddCnpj=(P.cliente.cnpj||'').replace(/\D/g,'')
+  let c=P.cliente.codigo?cli.find(x=>x.codigo===P.cliente.codigo):null
+  if(!c&&ddCnpj)c=cli.find(x=>(x.doc||'').replace(/\D/g,'')===ddCnpj)
+  const dados={
+    nome:P.cliente.contato||P.cliente.empresa,empresa:P.cliente.empresa,doc:P.cliente.cnpj,
+    email:P.cliente.email,telefone:P.cliente.telefone,cep:P.cliente.cep,cidade:P.cliente.cidade,estado:P.cliente.estado
+  }
+  if(c){
+    Object.assign(c,dados)
+    saveCLI(cli);P.cliente.codigo=c.codigo;marcarSujo();renderEditor()
+    toast('Cliente atualizado na base ('+c.codigo+').','ok')
+  }else{
+    const codigo=proxCodigoCliente()
+    cli.push({id:uid(),codigo,...dados,status:'ativo',fonte:'',notas:'',dataCadastro:hoje()})
+    saveCLI(cli);P.cliente.codigo=codigo;marcarSujo();renderEditor()
+    toast('Cliente cadastrado na base ('+codigo+').','ok')
+  }
+}
+function proxCodigoCliente(){
+  let seq=parseInt(localStorage.getItem('cli_seq')||'0',10)+1
+  localStorage.setItem('cli_seq',String(seq))
+  return 'CLI-'+String(seq).padStart(4,'0')
+}
+function ensureCodigosClientes(){
+  const cli=getCLI();let mudou=false
+  cli.forEach(c=>{if(!c.codigo){c.codigo=proxCodigoCliente();mudou=true}})
+  if(mudou)saveCLI(cli)
+}
 
 // ── Fatores de custo (editor) ──
 function toggleFat(id){const it=P.fatores.itens[id];if(!it)return;it.on=!it.on;marcarSujo();renderEditor()}
@@ -1543,9 +1631,10 @@ function renderClientes(){
   cli.sort((a,b)=>b.dataCadastro?.localeCompare(a.dataCadastro||'')||0)
   const tbody=document.getElementById('cli-tbody')
   if(!tbody)return
-  if(!cli.length){tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--mt)">Nenhum cliente encontrado</td></tr>`;return}
+  if(!cli.length){tbody.innerHTML=`<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--mt)">Nenhum cliente encontrado</td></tr>`;return}
   const badges={ativo:'b-at',prospect:'b-pr',inativo:'b-in'}
   tbody.innerHTML=cli.map(c=>`<tr>
+    <td><span style="font-size:12px;font-weight:700;color:#1A5276">${e(c.codigo||'—')}</span></td>
     <td><b>${e(c.nome)}</b></td>
     <td>${e(c.empresa||'')}</td>
     <td style="font-size:12px">${e(c.email||'')}</td>
@@ -1565,7 +1654,7 @@ function abrirModalCli(id){
   const fonteOpts=FONTES.map(f=>`<option ${f===(c?.fonte||'')?'selected':''}>${e(f)}</option>`).join('')
   const html=`<div class="overlay" id="modal-cli" onclick="if(event.target===this)fecharModal('modal-cli')">
   <div class="modal">
-    <div class="modal-hd"><h3>${c?'Editar':'Novo'} Cliente</h3><button class="xbtn" onclick="fecharModal('modal-cli')">✕</button></div>
+    <div class="modal-hd"><h3>${c?'Editar':'Novo'} Cliente ${c?.codigo?`<small style="color:#1A5276;font-weight:700">· ${e(c.codigo)}</small>`:''}</h3><button class="xbtn" onclick="fecharModal('modal-cli')">✕</button></div>
     <div class="modal-bd">
       <div class="grid2">
         <div class="campo"><label>Nome *</label><input id="mc-nome" value="${eA(c?.nome||'')}"></div>
@@ -1587,7 +1676,12 @@ function abrirModalCli(id){
             <option value="">—</option>${fonteOpts}
           </select></div>
       </div>
-      <div class="campo"><label>CNPJ/CPF</label><input id="mc-doc" value="${eA(c?.doc||'')}"></div>
+      <div class="campo"><label>CNPJ/CPF <small style="color:var(--mt);font-weight:400">(CNPJ preenche automático)</small></label><input id="mc-doc" value="${eA(c?.doc||'')}" placeholder="00.000.000/0000-00" onchange="buscarCNPJmodal(this.value)"></div>
+      <div class="grid3">
+        <div class="campo"><label>CEP</label><input id="mc-cep" value="${eA(c?.cep||'')}" placeholder="00000-000" onchange="buscarCEPmodal(this.value)"></div>
+        <div class="campo"><label>Cidade</label><input id="mc-cidade" value="${eA(c?.cidade||'')}"></div>
+        <div class="campo"><label>UF</label><input id="mc-uf" value="${eA(c?.estado||'')}"></div>
+      </div>
       <div class="campo"><label>Notas</label><textarea id="mc-notas" rows="2" style="background:#fff;border:1px solid var(--bd);border-radius:6px;padding:8px 12px;font-size:13px;font-family:inherit;width:100%;resize:vertical">${e(c?.notas||'')}</textarea></div>
     </div>
     <div class="modal-ft">
@@ -1598,20 +1692,49 @@ function abrirModalCli(id){
   document.getElementById('modal-root').innerHTML=html
 }
 
+async function buscarCNPJmodal(v){
+  const d=String(v||'').replace(/\D/g,'');if(d.length!==14)return
+  if(!window.eletron||!eletron.buscarCNPJ)return
+  toast('Buscando dados do CNPJ…','ok')
+  try{
+    const r=await eletron.buscarCNPJ(d)
+    if(r&&r.ok){
+      const x=r.dados,set=(id,val,force)=>{const el=document.getElementById(id);if(el&&(force||!el.value)&&val)el.value=val}
+      set('mc-emp',x.empresa,true);set('mc-email',x.email);set('mc-tel',x.telefone)
+      set('mc-cep',x.cep);set('mc-cidade',x.cidade,true);set('mc-uf',x.estado,true)
+      toast('Dados do CNPJ preenchidos!','ok')
+    }else toast('CNPJ: '+(r&&r.erro||'não encontrado'),'err')
+  }catch(err){toast('Erro ao buscar CNPJ: '+(err.message||err),'err')}
+}
+async function buscarCEPmodal(v){
+  const d=String(v||'').replace(/\D/g,'');if(d.length!==8)return
+  if(!window.eletron||!eletron.buscarCEP)return
+  try{
+    const r=await eletron.buscarCEP(d)
+    if(r&&r.ok){const ci=document.getElementById('mc-cidade'),uf=document.getElementById('mc-uf');if(ci&&r.dados.cidade)ci.value=r.dados.cidade;if(uf&&r.dados.estado)uf.value=r.dados.estado;toast('Endereço preenchido pelo CEP.','ok')}
+    else toast('CEP: '+(r&&r.erro||'não encontrado'),'err')
+  }catch(err){toast('Erro ao buscar CEP: '+(err.message||err),'err')}
+}
 function salvarCli(id){
   const nome=document.getElementById('mc-nome')?.value.trim()
   if(!nome){toast('Informe o nome do cliente.','err');return}
   const cli=getCLI()
+  const antigo=id?cli.find(c=>c.id===id):null
   const obj={
-    id:id||uid(),nome,
+    id:id||uid(),
+    codigo:antigo?.codigo||proxCodigoCliente(),
+    nome,
     empresa:document.getElementById('mc-emp')?.value.trim()||'',
     email:document.getElementById('mc-email')?.value.trim()||'',
     telefone:document.getElementById('mc-tel')?.value.trim()||'',
     status:document.getElementById('mc-status')?.value||'prospect',
     fonte:document.getElementById('mc-fonte')?.value||'',
     doc:document.getElementById('mc-doc')?.value.trim()||'',
+    cep:document.getElementById('mc-cep')?.value.trim()||'',
+    cidade:document.getElementById('mc-cidade')?.value.trim()||'',
+    estado:document.getElementById('mc-uf')?.value.trim()||'',
     notas:document.getElementById('mc-notas')?.value.trim()||'',
-    dataCadastro:id?(cli.find(c=>c.id===id)?.dataCadastro||hoje()):hoje()
+    dataCadastro:antigo?.dataCadastro||hoje()
   }
   if(id){const i=cli.findIndex(c=>c.id===id);if(i>=0)cli[i]=obj;else cli.push(obj)}
   else cli.push(obj)
@@ -1619,7 +1742,7 @@ function salvarCli(id){
   fecharModal('modal-cli')
   renderClientes()
   if(document.getElementById('pag-dash')?.classList.contains('ativa'))renderDash()
-  toast('Cliente salvo!','ok')
+  toast('Cliente salvo! ('+obj.codigo+')','ok')
 }
 
 function excluirCli(id){
@@ -1661,6 +1784,7 @@ async function exportCSV(tipo){
 // INICIALIZAÇÃO
 // ═══════════════════════════════════════════════════════
 atualizarHomeLogo()
+ensureCodigosClientes()
 window.addEventListener('beforeunload',ev=>{if(sujo){ev.preventDefault();ev.returnValue=''}})
 </script>
 </body>

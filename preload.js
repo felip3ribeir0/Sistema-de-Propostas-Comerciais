@@ -8,5 +8,7 @@ contextBridge.exposeInMainWorld('eletron', {
   salvar:     (bytes, nome, filtros) => ipcRenderer.invoke('dlg:save', { bytes, nome, filtros }),
   abrir:      ()              => ipcRenderer.invoke('dlg:open'),
   printToPDF: (nome)          => ipcRenderer.invoke('pdf:print', { nome }),
-  calcRota:   (cep)           => ipcRenderer.invoke('geo:rota', { cep })
+  calcRota:   (cep)           => ipcRenderer.invoke('geo:rota', { cep }),
+  buscarCNPJ: (cnpj)          => ipcRenderer.invoke('cnpj:buscar', { cnpj }),
+  buscarCEP:  (cep)           => ipcRenderer.invoke('cep:buscar', { cep })
 })

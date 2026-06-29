@@ -104,6 +104,39 @@ ipcMain.handle('geo:rota', async (_, { cep } = {}) => {
   } catch (e) { return { ok: false, erro: e.message } }
 })
 
+// ── Consulta de CNPJ (BrasilAPI) ─────────────────────────
+ipcMain.handle('cnpj:buscar', async (_, { cnpj } = {}) => {
+  try {
+    const d = String(cnpj || '').replace(/\D/g, '')
+    if (d.length !== 14) return { ok: false, erro: 'CNPJ inválido (14 dígitos)' }
+    const r = await fetch('https://brasilapi.com.br/api/cnpj/v1/' + d, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) EngenheiroDoProjeto-Propostas/1.0' } })
+    if (!r.ok) return { ok: false, erro: 'CNPJ não encontrado' }
+    const j = await r.json()
+    return { ok: true, dados: {
+      empresa:   j.razao_social || j.nome_fantasia || '',
+      fantasia:  j.nome_fantasia || '',
+      email:     (j.email || '').toLowerCase(),
+      telefone:  j.ddd_telefone_1 || '',
+      cep:       j.cep ? String(j.cep).replace(/\D/g, '') : '',
+      cidade:    j.municipio || '',
+      estado:    j.uf || '',
+      logradouro: j.logradouro || '', numero: j.numero || '', bairro: j.bairro || ''
+    } }
+  } catch (e) { return { ok: false, erro: e.message } }
+})
+
+// ── Consulta de CEP (ViaCEP) ─────────────────────────────
+ipcMain.handle('cep:buscar', async (_, { cep } = {}) => {
+  try {
+    const d = String(cep || '').replace(/\D/g, '')
+    if (d.length !== 8) return { ok: false, erro: 'CEP inválido (8 dígitos)' }
+    const r = await fetch('https://viacep.com.br/ws/' + d + '/json/')
+    const j = await r.json()
+    if (!j || j.erro) return { ok: false, erro: 'CEP não encontrado' }
+    return { ok: true, dados: { logradouro: j.logradouro || '', bairro: j.bairro || '', cidade: j.localidade || '', estado: j.uf || '' } }
+  } catch (e) { return { ok: false, erro: e.message } }
+})
+
 ipcMain.handle('pdf:print', async (_, { nome } = {}) => {
   try {
     const data = await win.webContents.printToPDF({
